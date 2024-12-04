@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 #define MAX_INPUT_SIZE 1024
 #define MAX_ARG_SIZE 100
@@ -24,7 +25,7 @@ int main() {
     char *args[MAX_ARG_SIZE];   // Argümanları saklamak için dizi
     pid_t bg_process = 0;       // Arka plan işlemlerini takip için
 
-    while (1) {
+    while (1) {  // Kullanıcı quit yazana kadar çalışır
         // Prompt yazdırma
         printf("> ");
         fflush(stdout);
@@ -64,6 +65,26 @@ int main() {
             input[strlen(input) - 1] = '\0';  // '&' karakterini kaldır
         }
 
+
+
+        // Giriş yeniden yönlendirme kontrolü
+        char *input_redirect = strstr(input, "<");
+        char *redirect_file = NULL;  // Giriş dosyasının adını saklamak için
+
+        if (input_redirect) {
+            *input_redirect = '\0';  // Komut kısmını ayır
+            input_redirect++;        // Dosya adını işaret et
+            while (*input_redirect == ' ') input_redirect++;  // Boşlukları temizle
+
+            redirect_file = input_redirect;  // Dosya adı olarak sakla
+
+            // Dosyanın varlığını kontrol et
+            if (access(redirect_file, F_OK) != 0) {
+                printf("Giriş dosyası bulunamadı: %s\n", redirect_file);
+                continue;
+            }
+        }
+
         // Kullanıcı girişini tokenize et
         parse_input(input, args);
 
@@ -74,6 +95,17 @@ int main() {
             perror("Fork failed");
         } else if (pid == 0) {
             // Çocuk proses
+            if (redirect_file) {
+                // Dosyayı aç ve stdin'i yönlendir
+                int fd = open(redirect_file, O_RDONLY);
+                if (fd < 0) {
+                    perror("Dosya açılamadı");
+                    exit(1);
+                }
+                dup2(fd, STDIN_FILENO);  // Standart giriş akışını yönlendir
+                close(fd);              // Kullanılmayan dosya tanımlayıcısını kapat
+            }
+
             execvp(args[0], args);  // Komutu ve argümanları çalıştır
             perror("Execution failed");  // Eğer execvp başarısız olursa
             exit(1);
