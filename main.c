@@ -85,6 +85,18 @@ int main() {
             }
         }
 
+        // Çıkış yeniden yönlendirme kontrolü
+        char *output_redirect = strstr(input, ">");
+        char *redirect_out_file = NULL;
+
+        if (output_redirect) {
+            *output_redirect = '\0';  // '>' karakterini ayır ve komut kısmını sonlandır
+            output_redirect++;        // '>' karakterinin hemen sonrasını işaret et
+            while (*output_redirect == ' ')  // Boşlukları atla
+                output_redirect++;
+            redirect_out_file = output_redirect;
+        }
+
         // Kullanıcı girişini tokenize et
         parse_input(input, args);
 
@@ -105,7 +117,16 @@ int main() {
                 dup2(fd, STDIN_FILENO);  // Standart giriş akışını yönlendir
                 close(fd);              // Kullanılmayan dosya tanımlayıcısını kapat
             }
-
+            if (redirect_out_file) {
+                int fd_out = open(redirect_out_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (fd_out < 0) {
+                    perror("Çıkış dosyası açılamadı"); 
+                    exit(1);
+                }
+                dup2(fd_out, STDOUT_FILENO); // Standart çıktıyı dosyaya yönlendir
+                close(fd_out); // Dosya tanımlayıcıyı kapat
+            }
+            
             execvp(args[0], args);  // Komutu ve argümanları çalıştır
             perror("Execution failed");  // Eğer execvp başarısız olursa
             exit(1);
