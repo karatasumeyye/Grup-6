@@ -1,3 +1,6 @@
+// POSIX standartlarını kullanabilmek için gereken makro tanımı
+// Bu tanım, POSIX.1-2008 standartlarında tanımlanan özellikleri kullanmamızı sağlar
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -5,9 +8,14 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <signal.h>// Sinyal işleme fonksiyonlarını kullanmak için gerekli başlık dosyası
 
 #define MAX_INPUT_SIZE 1024
 #define MAX_ARG_SIZE 100
+
+// Signal handler için gerekli değişkenler ve fonksiyonlar
+volatile sig_atomic_t child_exit_status;  // Çocuk prosesin çıkış durumunu saklar
+volatile pid_t child_pid;                 // Çocuk prosesin kimlik numarasını saklar
 
 // Komut ve argümanları tokenize eden bir fonksiyon
 void parse_input(char *input, char **args) {
@@ -19,11 +27,42 @@ void parse_input(char *input, char **args) {
     }
     args[i] = NULL;  // Argümanların sonuna NULL koymak zorundayız
 }
+ 
+// & komutu için
+void handle_sigchld(int sig) {
+    (void)sig;  // Kullanılmayan parametre uyarısını engellemek için
+    int status;    // Çocuk prosesin çıkış durumunu saklamak için
+    pid_t pid;     // Çocuk prosesin PID'sini saklamak için
+    
+    // Sonlanan tüm çocuk prosesleri kontrol et
+    // WNOHANG: Bekleyen çocuk yoksa hemen dön
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        child_pid = pid;
+        // Proses normal bir şekilde çıkış yaptı mı kontrol et
+        if (WIFEXITED(status)) {
+            child_exit_status = WEXITSTATUS(status);  // Çıkış kodunu al
+            printf("[%d] retval: %d\n", pid, child_exit_status);  // Sonucu yazdır
+        }
+    }
+}
 
 int main() {
     char input[MAX_INPUT_SIZE];  // Kullanıcı girişini saklamak için buffer
     char *args[MAX_ARG_SIZE];   // Argümanları saklamak için dizi
     pid_t bg_process = 0;       // Arka plan işlemlerini takip için
+
+    // Signal handler yapılandırması
+    struct sigaction sa;                     // Sinyal işleyici yapısı
+    sa.sa_handler = &handle_sigchld;         // Kullanılacak handler fonksiyonunu belirt
+    sigemptyset(&sa.sa_mask);               // Sinyal maskesini temizle
+    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP; // Handler bayraklarını ayarla
+                                            // SA_RESTART: Sistem çağrılarının yeniden başlatılmasını sağlar
+                                            // SA_NOCLDSTOP: Sadece sonlanan çocuklar için sinyal üret
+    // Signal handler'ı sisteme kaydet
+    if (sigaction(SIGCHLD, &sa, 0) == -1) {
+        perror("sigaction");
+        exit(1);
+    }
 
     while (1) {  // Kullanıcı quit yazana kadar çalışır
         // Prompt yazdırma
