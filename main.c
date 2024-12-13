@@ -46,6 +46,135 @@ void handle_sigchld(int sig) {
     }
 }
 
+// Pipe işlemlerini kontrol eden yardımcı fonksiyon
+void execute_piped_commands(char *input) {
+    char *commands[MAX_ARG_SIZE];    // Her bir komut için dizi
+    char *args[MAX_ARG_SIZE][MAX_ARG_SIZE];  // Her komutun argümanları için 2D dizi
+    int cmd_count = 0;               // Toplam komut sayısı
+    int pipe_count = 0;              // Pipe sayısı
+
+    // Komutları ayır (pipe karakterine göre)
+    char *cmd = strtok(input, "|");
+    while (cmd != NULL && cmd_count < MAX_ARG_SIZE) {
+        commands[cmd_count++] = cmd;
+        cmd = strtok(NULL, "|");
+    }
+    pipe_count = cmd_count - 1;
+
+    // Her bir komut için redirection kontrolü ve parse
+    char *redirect_files[MAX_ARG_SIZE][2];  // [0] input, [1] output için
+    for (int i = 0; i < cmd_count; i++) {
+        redirect_files[i][0] = NULL;
+        redirect_files[i][1] = NULL;
+        
+        // Input redirection kontrolü
+        char *input_redirect = strstr(commands[i], "<");
+        if (input_redirect) {
+            *input_redirect = '\0';
+            input_redirect++;
+            while (*input_redirect == ' ') input_redirect++;
+            redirect_files[i][0] = strdup(input_redirect);
+            
+            // Dosya adından sonraki olası boşlukları temizle
+            char *end = redirect_files[i][0];
+            while (*end && *end != ' ') end++;
+            *end = '\0';
+        }
+
+        // Output redirection kontrolü
+        char *output_redirect = strstr(commands[i], ">");
+        if (output_redirect) {
+            *output_redirect = '\0';
+            output_redirect++;
+            while (*output_redirect == ' ') output_redirect++;
+            redirect_files[i][1] = strdup(output_redirect);
+            
+            // Dosya adından sonraki olası boşlukları temizle
+            char *end = redirect_files[i][1];
+            while (*end && *end != ' ') end++;
+            *end = '\0';
+        }
+
+        // Komutu parse et
+        parse_input(commands[i], args[i]);
+    }
+
+    // Pipe'ları oluştur
+    int pipes[MAX_ARG_SIZE - 1][2];
+    for (int i = 0; i < pipe_count; i++) {
+        if (pipe(pipes[i]) < 0) {
+            perror("Pipe creation failed");
+            return;
+        }
+    }
+
+    // Her komut için bir proses oluştur
+    for (int i = 0; i < cmd_count; i++) {
+        pid_t pid = fork();
+
+        if (pid == 0) {  // Çocuk proses
+            // Input redirection
+            if (redirect_files[i][0]) {
+                int fd = open(redirect_files[i][0], O_RDONLY);
+                if (fd < 0) {
+                    perror("Input file open failed");
+                    exit(1);
+                }
+                dup2(fd, STDIN_FILENO);
+                close(fd);
+            }
+            // İlk komut değilse ve input redirection yoksa, önceki pipe'ın çıkışını stdin'e bağla
+            else if (i > 0) {
+                dup2(pipes[i-1][0], STDIN_FILENO);
+            }
+
+            // Output redirection
+            if (redirect_files[i][1]) {
+                int fd = open(redirect_files[i][1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (fd < 0) {
+                    perror("Output file open failed");
+                    exit(1);
+                }
+                dup2(fd, STDOUT_FILENO);
+                close(fd);
+            }
+            // Son komut değilse ve output redirection yoksa, sonraki pipe'ın girişini stdout'a bağla
+            else if (i < pipe_count) {
+                dup2(pipes[i][1], STDOUT_FILENO);
+            }
+
+            // Kullanılmayan pipe'ları kapat
+            for (int j = 0; j < pipe_count; j++) {
+                close(pipes[j][0]);
+                close(pipes[j][1]);
+            }
+
+            // Komutu çalıştır
+            execvp(args[i][0], args[i]);
+            perror("Command execution failed");
+            exit(1);
+        }
+    }
+
+    // Ana proses: Tüm pipe'ları kapat
+    for (int i = 0; i < pipe_count; i++) {
+        close(pipes[i][0]);
+        close(pipes[i][1]);
+    }
+
+    // Memory cleanup
+    for (int i = 0; i < cmd_count; i++) {
+        if (redirect_files[i][0]) free(redirect_files[i][0]);
+        if (redirect_files[i][1]) free(redirect_files[i][1]);
+    }
+
+    // Tüm çocuk proseslerin bitmesini bekle
+    for (int i = 0; i < cmd_count; i++) {
+        wait(NULL);
+    }
+}
+
+
 int main() {
     char input[MAX_INPUT_SIZE];  // Kullanıcı girişini saklamak için buffer
     char *args[MAX_ARG_SIZE];   // Argümanları saklamak için dizi
@@ -103,7 +232,11 @@ int main() {
             is_background = 1;
             input[strlen(input) - 1] = '\0';  // '&' karakterini kaldır
         }
-
+        // Pipe kontrolü
+        if (strchr(input, '|') != NULL) {
+         execute_piped_commands(input);
+         continue;
+        }
 
 
         // Giriş yeniden yönlendirme kontrolü
