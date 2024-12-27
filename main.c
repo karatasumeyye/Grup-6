@@ -1,5 +1,14 @@
 // POSIX standartlarını kullanabilmek için gereken makro tanımı
 // Bu tanım, POSIX.1-2008 standartlarında tanımlanan özellikleri kullanmamızı sağlar
+
+//Grup 6
+// Dilara Karaoğlan 1/B B231210374
+// Melih Yasak 1/A B221210079
+// Sümeyye Karataş 1/B B221210005
+// Damla Korkmaz 1/B B221210098
+// Mahdi Shahrouei 1/A B221210559
+
+
 #define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
